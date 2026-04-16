@@ -1,0 +1,229 @@
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Link, useSearchParams } from "react-router";
+import { ArrowUpRight, Check, ChevronDown, Clock3, GitCompareArrows, Heart, Plus, Search, Sigma, SlidersHorizontal, X } from "lucide-react";
+import { usePlan } from "../context/PlanContext";
+import { requestJson } from "../lib/api";
+import type { CatalogCourse, ExploreResponse } from "../lib/catalog";
+import { loadCompareSelection, loadShortlist, saveCompareSelection, saveShortlist, toCompareSelection, toShortlistEntry, type CompareSelection, type ShortlistEntry } from "../lib/courseToolkit";
+import { average, formatAcademicTerm, formatCourseSignal, formatMetric, getBarWidth, getSubjectTheme } from "../lib/display";
+import { SkeletonGrid } from "../components/ui/SkeletonCard";
+
+type SortOption = "relevance" | "workload_desc" | "workload_asc" | "variability_desc" | "responses_desc" | "alpha" | "course_number";
+type ExplorePreset = "" | "heavy" | "light" | "high_variance" | "low_data" | "high_confidence";
+type ExploreFilters = {
+  departments: string[];
+  level: string;
+  creditsMin: string;
+  creditsMax: string;
+  avgHoursMin: string;
+  avgHoursMax: string;
+  stdDevMin: string;
+  stdDevMax: string;
+  responsesMin: string;
+  term: string;
+  attribute: string;
+  preset: ExplorePreset;
+  sort: SortOption;
+};
+type SubjectGroup = { dept: string; courses: CatalogCourse[]; avgHours: number | null; avgStdDev: number | null; avgResponses: number | null };
+
+const DEFAULT_FILTERS: ExploreFilters = {
+  departments: [], level: "", creditsMin: "", creditsMax: "", avgHoursMin: "", avgHoursMax: "", stdDevMin: "", stdDevMax: "", responsesMin: "", term: "", attribute: "", preset: "", sort: "relevance",
+};
+const SAVED_PRESET_KEY = "worklode_explore_saved_preset";
+const EXPLORE_PAGE_LIMIT = 1000;
+
+function buildExploreQuery(searchTerm: string, filters: ExploreFilters) {
+  const params = new URLSearchParams();
+  if (searchTerm.trim()) params.set("q", searchTerm.trim());
+  if (filters.departments.length) params.set("departments", filters.departments.join(","));
+  if (filters.level) params.set("levels", filters.level);
+  if (filters.creditsMin) params.set("credits_min", filters.creditsMin);
+  if (filters.creditsMax) params.set("credits_max", filters.creditsMax);
+  if (filters.avgHoursMin) params.set("avg_hours_min", filters.avgHoursMin);
+  if (filters.avgHoursMax) params.set("avg_hours_max", filters.avgHoursMax);
+  if (filters.stdDevMin) params.set("std_dev_min", filters.stdDevMin);
+  if (filters.stdDevMax) params.set("std_dev_max", filters.stdDevMax);
+  if (filters.responsesMin) params.set("responses_min", filters.responsesMin);
+  if (filters.term) params.set("term_availability", filters.term);
+  if (filters.attribute) params.set("attribute", filters.attribute);
+  if (filters.preset) params.set("preset", filters.preset);
+  params.set("sort", filters.sort);
+  params.set("limit", String(EXPLORE_PAGE_LIMIT));
+  return params.toString();
+}
+
+function loadSavedPreset() {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(SAVED_PRESET_KEY);
+    return raw ? (JSON.parse(raw) as ExploreFilters) : null;
+  } catch {
+    return null;
+  }
+}
+
+function buildCourseSummary(course: CatalogCourse) {
+  const parts: string[] = [];
+  if (course.avgHours !== null) parts.push(course.avgHours >= 15 ? "heavy load" : course.avgHours >= 8 ? "moderate load" : "lighter load");
+  if (course.stdDev !== null) parts.push(course.stdDev >= 5 ? "more uneven pacing" : "steadier pacing");
+  if (course.responses !== null) parts.push(course.responses >= 50 ? "strong sample" : "limited sample");
+  return parts.length ? parts.join(" / ") : "No public workload signal yet";
+}
+
+export function Explore() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { addCourseFromCatalog, isInPlan } = usePlan();
+  const initialQuery = searchParams.get("q") || "";
+  const [query, setQuery] = useState(initialQuery);
+  const [debouncedQuery, setDebouncedQuery] = useState(initialQuery);
+  const [filters, setFilters] = useState<ExploreFilters>(DEFAULT_FILTERS);
+  const [savedPreset, setSavedPreset] = useState<ExploreFilters | null>(() => loadSavedPreset());
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [result, setResult] = useState<ExploreResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [expandedSubjects, setExpandedSubjects] = useState<Record<string, boolean>>({});
+  const [expandedCourseId, setExpandedCourseId] = useState<string | null>(null);
+  const [page, setPage] = useState(0);
+
+  useEffect(() => { setQuery(initialQuery); setDebouncedQuery(initialQuery); }, [initialQuery]);
+  useEffect(() => { setPage(0); }, [debouncedQuery, filters]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedQuery(query);
+      const next = query.trim();
+      if (next) setSearchParams({ q: next }); else setSearchParams({});
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [query, setSearchParams]);
+  useEffect(() => {
+    const controller = new AbortController();
+    const queryString = `${buildExploreQuery(debouncedQuery, filters)}&offset=${page * EXPLORE_PAGE_LIMIT}`;
+    void requestJson<ExploreResponse>(`/catalog/explore?${queryString}`, { cacheTtlMs: 20_000, signal: controller.signal })
+      .then((data) => { setResult(data); setLoadError(null); })
+      .catch((error) => { if (!controller.signal.aborted) setLoadError(error instanceof Error ? error.message : "Failed to load course catalog"); })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [debouncedQuery, filters, page]);
+
+  const courses = result?.data ?? [];
+  const departments = result?.availableFilters.departments ?? [];
+  const levels = result?.availableFilters.levels ?? [];
+  const attributes = result?.availableFilters.attributes ?? [];
+  const terms = result?.availableFilters.terms ?? [];
+  const groupedSubjects = useMemo<SubjectGroup[]>(() => {
+    const bucket = new Map<string, CatalogCourse[]>();
+    for (const course of courses) {
+      const dept = course.dept || "Other";
+      bucket.set(dept, [...(bucket.get(dept) ?? []), course]);
+    }
+    return Array.from(bucket.entries()).map(([dept, deptCourses]) => ({
+      dept, courses: deptCourses, avgHours: average(deptCourses.map((course) => course.avgHours)), avgStdDev: average(deptCourses.map((course) => course.stdDev)), avgResponses: average(deptCourses.map((course) => course.responses)),
+    })).sort((a, b) => a.dept.localeCompare(b.dept));
+  }, [courses]);
+  useEffect(() => {
+    setExpandedSubjects((current) => Object.fromEntries(groupedSubjects.map((group) => [group.dept, current[group.dept] ?? false])));
+  }, [groupedSubjects]);
+
+  const activeFilterCount = filters.departments.length + Number(Boolean(filters.level)) + Number(Boolean(filters.creditsMin || filters.creditsMax)) + Number(Boolean(filters.avgHoursMin || filters.avgHoursMax)) + Number(Boolean(filters.stdDevMin || filters.stdDevMax)) + Number(Boolean(filters.responsesMin)) + Number(Boolean(filters.term)) + Number(Boolean(filters.attribute)) + Number(Boolean(filters.preset));
+  const filterSummary = [filters.departments.length ? filters.departments.join(", ") : "", filters.level ? `level ${filters.level}` : "", filters.preset ? filters.preset.replaceAll("_", " ") : "", filters.term ? formatAcademicTerm(filters.term) : ""].filter(Boolean).slice(0, 3).join(" / ");
+
+
+  const [hasInitializedTerm, setHasInitializedTerm] = useState(false);
+
+  useEffect(() => {
+    if (!hasInitializedTerm && terms.length > 0 && !filters.term) {
+      setFilters((current) => ({ ...current, term: terms[0] }));
+      setHasInitializedTerm(true);
+    }
+  }, [terms, filters.term, hasInitializedTerm]);
+
+  return (
+    <div className="min-h-screen bg-background pb-16">
+      <section className="glass-panel border-x-0 border-t-0 rounded-none">
+        <div className="container mx-auto px-4 py-7">
+          <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
+            <div className="max-w-3xl">
+              <div className="text-xs font-bold uppercase tracking-[0.16em] text-muted">Explore</div>
+              <h1 className="mt-2 text-3xl font-black tracking-tight text-text">Browse courses by subject</h1>
+              <p className="mt-2 text-sm leading-6 text-text-secondary">Cleaner subject cards, quieter color cues, and direct planner actions.</p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr),auto,auto]">
+              <div className="relative min-w-[320px]">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" size={16} />
+                <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search..." className="w-full rounded-2xl nm-input px-10 py-3 text-sm outline-none" />
+                {query && <button type="button" onClick={() => setQuery("")} className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-2 text-muted hover:bg-surface"><X size={14} /></button>}
+              </div>
+              <select value={filters.sort} onChange={(event) => setFilters((current) => ({ ...current, sort: event.target.value as SortOption }))} className="rounded-2xl nm-button px-4 py-3 text-sm font-bold text-text outline-none">
+                <option value="relevance">Relevance</option><option value="workload_desc">Workload high-low</option><option value="workload_asc">Workload low-high</option><option value="variability_desc">Most variable</option><option value="responses_desc">Most responses</option><option value="alpha">Alphabetical</option><option value="course_number">Course number</option>
+              </select>
+              <button type="button" onClick={() => setFiltersOpen((open) => !open)} className="inline-flex items-center gap-2 rounded-2xl nm-button px-4 py-3 text-sm font-bold text-text"><SlidersHorizontal size={16} />Filters{activeFilterCount > 0 && <span className="rounded-full bg-primary px-2 py-0.5 text-xs font-bold text-white nm-raised">{activeFilterCount}</span>}</button>
+            </div>
+          </div>
+          <div className="mt-4 flex flex-wrap items-center gap-3 text-sm text-text-secondary">
+            <span>{loading ? "Loading courses..." : `${groupedSubjects.length} subjects / ${result?.total ?? 0} courses`}</span>
+            {activeFilterCount > 0 && <><span className="h-1 w-1 rounded-full bg-border" /><span>{filterSummary || `${activeFilterCount} filters active`}</span><button type="button" onClick={() => setFilters(DEFAULT_FILTERS)} className="font-semibold text-text">Clear all</button></>}
+          </div>
+          {filtersOpen && <div className="mt-5 rounded-[28px] border border-border bg-surface p-4 shadow-sm"><div className="grid gap-4 xl:grid-cols-4">
+            <FilterBlock label="Departments">{departments.map((dept) => { const selected = filters.departments.includes(dept); return <label key={dept} className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-sm ${selected ? "border-primary bg-primary-light text-primary" : "border-border bg-surface text-text"}`}><input type="checkbox" checked={selected} onChange={() => setFilters((current) => ({ ...current, departments: selected ? current.departments.filter((value) => value !== dept) : [...current.departments, dept] }))} />{dept}</label>; })}</FilterBlock>
+            <div className="space-y-4">
+              <LabeledSelect label="Course level" value={filters.level} onChange={(value) => setFilters((current) => ({ ...current, level: value }))} options={["", ...levels]} format={(value) => value || "Any"} />
+              <RangeFields label="Credits" minValue={filters.creditsMin} maxValue={filters.creditsMax} onMinChange={(value) => setFilters((current) => ({ ...current, creditsMin: value }))} onMaxChange={(value) => setFilters((current) => ({ ...current, creditsMax: value }))} />
+              <TextField label="Minimum responses" value={filters.responsesMin} onChange={(value) => setFilters((current) => ({ ...current, responsesMin: value }))} />
+            </div>
+            <div className="space-y-4">
+              <RangeFields label="Avg hours / week" minValue={filters.avgHoursMin} maxValue={filters.avgHoursMax} onMinChange={(value) => setFilters((current) => ({ ...current, avgHoursMin: value }))} onMaxChange={(value) => setFilters((current) => ({ ...current, avgHoursMax: value }))} />
+              <RangeFields label="Variability" minValue={filters.stdDevMin} maxValue={filters.stdDevMax} onMinChange={(value) => setFilters((current) => ({ ...current, stdDevMin: value }))} onMaxChange={(value) => setFilters((current) => ({ ...current, stdDevMax: value }))} />
+            </div>
+            <div className="space-y-4">
+              <LabeledSelect label="Term availability" value={filters.term} onChange={(value) => setFilters((current) => ({ ...current, term: value }))} options={["", ...terms]} format={(value) => value ? formatAcademicTerm(value) : "Any"} />
+              <LabeledSelect label="Requirement / tag" value={filters.attribute} onChange={(value) => setFilters((current) => ({ ...current, attribute: value }))} options={["", ...attributes]} format={(value) => value || "Any"} />
+              <div><div className="text-xs font-bold uppercase tracking-wide text-muted">Quick filters</div><div className="mt-2 flex flex-wrap gap-2">{["heavy", "light", "high_variance", "low_data", "high_confidence"].map((preset) => <button key={preset} type="button" onClick={() => setFilters((current) => ({ ...current, preset: current.preset === preset ? "" : (preset as ExplorePreset) }))} className={`rounded-full px-3 py-1.5 text-xs font-bold transition-all relative overflow-hidden ${filters.preset === preset ? "bg-primary text-white nm-raised liquid-glass" : "nm-button text-text-secondary"}`}>{preset.replaceAll("_", " ")}</button>)}</div></div>
+            </div>
+          </div><div className="mt-4 flex flex-wrap gap-3"><button type="button" onClick={() => { window.localStorage.setItem(SAVED_PRESET_KEY, JSON.stringify(filters)); setSavedPreset(filters); }} className="rounded-xl nm-button px-4 py-2 text-sm font-bold text-text">Save this view</button>{savedPreset && <button type="button" onClick={() => setFilters(savedPreset)} className="rounded-xl nm-button px-4 py-2 text-sm font-bold text-text">Apply saved view</button>}</div></div>}
+        </div>
+      </section>
+
+      <section className="container mx-auto px-4 py-6">
+        {loading && <SkeletonGrid count={9} />}
+        {!loading && loadError && <div className="rounded-2xl border border-red-200 bg-red-50 px-5 py-6 text-red-700">{loadError}</div>}
+        {!loading && !loadError && !courses.length && <div className="rounded-[28px] border border-border bg-surface px-6 py-10 text-center shadow-sm"><h2 className="text-xl font-bold text-text">No courses matched this view</h2><p className="mt-2 text-sm text-text-secondary">Try broadening the search or clearing a few filters.</p></div>}
+        {!loading && !loadError && courses.length > 0 && <div className="columns-1 gap-4 md:columns-2 xl:columns-3">
+          {groupedSubjects.map((group) => {
+            const theme = getSubjectTheme(group.dept);
+            const expanded = Boolean(expandedSubjects[group.dept]);
+            return <section key={group.dept} className="mb-4 break-inside-avoid rounded-[28px] nm-raised p-2" style={{ borderColor: theme.accentBorder }}>
+              <button type="button" onClick={() => setExpandedSubjects((current) => ({ ...current, [group.dept]: !current[group.dept] }))} className="w-full px-4 py-4 text-left">
+                <div className="flex items-start justify-between gap-4"><div><div className="flex flex-wrap items-center gap-2"><span className="rounded-full border px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.16em]" style={{ borderColor: theme.accentBorder, backgroundColor: theme.accentSoft, color: theme.accentText }}>{group.dept}</span><span className="text-xs text-text-secondary">{group.courses.length} courses</span></div><div className="mt-3 grid grid-cols-2 gap-3 text-sm text-text-secondary"><Metric icon={<Clock3 size={13} />} label="Avg load" value={formatMetric(group.avgHours, "h")} /><Metric icon={<Sigma size={13} />} label="Var" value={formatMetric(group.avgStdDev, "h")} /></div></div><div className="flex items-center gap-2 text-xs font-semibold text-text-secondary"><span>{expanded ? "Hide" : "Show"}</span><ChevronDown size={16} className={expanded ? "rotate-180 transition-transform" : "transition-transform"} /></div></div>
+              </button>
+              {expanded && <div className="border-t border-border px-3 py-3"><div className="mb-3 text-xs text-text-secondary">{formatMetric(group.avgResponses)} average responses across visible courses</div><div className="space-y-2">
+                {group.courses.map((course) => {
+                  const key = course.courseCode || course.id;
+                  const open = expandedCourseId === key;
+                  const inPlan = isInPlan(key);
+                  return <div key={`${key}-${course.section || "course"}`} className="rounded-[22px] border border-border bg-surface" style={open ? { backgroundColor: theme.accentSoft, borderColor: theme.accentBorder } : undefined}>
+                    <button type="button" onClick={() => setExpandedCourseId((current) => current === key ? null : key)} className="w-full px-3 py-3 text-left">
+                      <div className="flex items-start justify-between gap-3"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><div className="font-bold text-text">{course.code}</div><span className="rounded-full border border-border bg-white px-2 py-0.5 text-[11px] font-semibold text-text-secondary">{formatCourseSignal(course.trustTier, course.trustLabel)}</span></div><div className="mt-1 truncate text-sm text-text-secondary">{course.name}</div></div><div className="text-right"><div className="text-sm font-bold text-text">{formatMetric(course.avgHours, "h")}</div><div className="text-xs text-text-secondary">{formatMetric(course.stdDev, "h")} variance</div></div></div>
+                      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-200/70"><div className="h-full rounded-full" style={{ width: `${getBarWidth(course.avgHours, 20)}%`, backgroundColor: theme.accent }} /></div>
+                    </button>
+                    {open && <div className="border-t border-border px-3 py-3"><div className="grid gap-3 md:grid-cols-2"><MiniBar label="Load" value={formatMetric(course.avgHours, "h")} width={getBarWidth(course.avgHours, 20)} accent={theme.accent} /><MiniBar label="Responses" value={course.responses === null ? "N/A" : String(course.responses)} width={getBarWidth(course.responses, 120)} accent={theme.accent} /></div><div className="mt-3 flex flex-wrap gap-2"><Chip>{course.credits ?? "?"} credits</Chip><Chip>{course.level}</Chip><Chip>{formatAcademicTerm(course.latestTerm)}</Chip>{course.attributes.slice(0, 2).map((attribute) => <Chip key={attribute}>{attribute}</Chip>)}</div><div className="mt-3 rounded-2xl border-l-4 nm-inset p-4 text-sm text-text-secondary" style={{ borderColor: theme.accent }}><div className="text-xs font-bold uppercase tracking-[0.14em] text-muted">Why this course</div><div className="mt-2 leading-relaxed">Load: {course.avgHours === null ? "unknown" : course.avgHours >= 15 ? "high commitment" : course.avgHours >= 8 ? "moderate load" : "lighter option"} / Variance: {course.stdDev === null ? "unknown" : course.stdDev >= 4 ? "spikier pacing" : "steadier pacing"} / Planner fit: {inPlan ? "already in your active plan" : course.avgHours !== null && course.avgHours <= 10 ? "good candidate to balance a heavy scenario" : "better paired with lighter supporting courses"}.</div></div><div className="mt-4 flex flex-col gap-2 sm:flex-row"><button type="button" onClick={() => addCourseFromCatalog(course)} disabled={inPlan} className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-primary px-3.5 py-2.5 text-sm font-bold text-white nm-raised disabled:bg-emerald-600 disabled:shadow-nm-inset">{inPlan ? <Check size={14} /> : <Plus size={14} />}{inPlan ? "In plan" : "Add to plan"}</button><Link to={`/course/${encodeURIComponent(key)}`} className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl nm-button px-3.5 py-2.5 text-sm font-bold text-text">More info<ArrowUpRight size={14} /></Link></div></div>}
+                  </div>;
+                })}
+              </div></div>}
+            </section>;
+          })}
+        </div>}
+
+      </section>
+    </div>
+  );
+}
+
+function FilterBlock({ label, children }: { label: string; children: ReactNode }) { return <div><div className="text-xs font-bold uppercase tracking-wide text-muted">{label}</div><div className="mt-3 grid max-h-40 gap-2 overflow-auto pr-1">{children}</div></div>; }
+function LabeledSelect({ label, value, onChange, options, format }: { label: string; value: string; onChange: (value: string) => void; options: string[]; format: (value: string) => string }) { return <label className="block"><div className="text-xs font-bold uppercase tracking-wide text-muted">{label}</div><select value={value} onChange={(event) => onChange(event.target.value)} className="mt-2 w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm outline-none focus:border-primary">{options.map((option) => <option key={option || "empty"} value={option}>{format(option)}</option>)}</select></label>; }
+function TextField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) { return <label className="block"><div className="text-xs font-bold uppercase tracking-wide text-muted">{label}</div><input value={value} onChange={(event) => onChange(event.target.value)} type="number" min="0" className="mt-2 w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm outline-none focus:border-primary" /></label>; }
+function RangeFields({ label, minValue, maxValue, onMinChange, onMaxChange }: { label: string; minValue: string; maxValue: string; onMinChange: (value: string) => void; onMaxChange: (value: string) => void }) { return <div><div className="text-xs font-bold uppercase tracking-wide text-muted">{label}</div><div className="mt-2 grid grid-cols-2 gap-2"><input type="number" min="0" value={minValue} onChange={(event) => onMinChange(event.target.value)} placeholder="Min" className="rounded-xl border border-border bg-surface px-3 py-2.5 text-sm outline-none focus:border-primary" /><input type="number" min="0" value={maxValue} onChange={(event) => onMaxChange(event.target.value)} placeholder="Max" className="rounded-xl border border-border bg-surface px-3 py-2.5 text-sm outline-none focus:border-primary" /></div></div>; }
+function Metric({ icon, label, value }: { icon: ReactNode; label: string; value: string }) { return <div className="flex items-center gap-2"><span className="text-muted">{icon}</span><span>{label}</span><span className="font-semibold text-text">{value}</span></div>; }
+function Chip({ children }: { children: ReactNode }) { return <span className="rounded-full border border-border bg-surface px-2.5 py-1 text-xs font-semibold text-text-secondary">{children}</span>; }
+function MiniBar({ label, value, width, accent }: { label: string; value: string; width: number; accent: string }) { return <div className="rounded-xl nm-inset px-3 py-3"><div className="flex items-center justify-between gap-3 text-sm"><span className="font-bold text-text">{label}</span><span className="font-bold text-text">{value}</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-surface-2"><div className="h-full rounded-full" style={{ width: `${width}%`, backgroundColor: accent }} /></div></div>; }
