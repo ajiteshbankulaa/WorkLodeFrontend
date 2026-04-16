@@ -4,6 +4,7 @@ import { Link } from "react-router";
 import { AnimatePresence, motion } from "motion/react";
 import { GoogleSignInButton } from "../components/GoogleSignInButton";
 import { useAuth } from "../context/AuthContext";
+import { API_BASE } from "../lib/api";
 
 type ExtractedInfo = {
   exams: { label: string; date?: string; time?: string }[];
@@ -45,8 +46,6 @@ type SubmitResult = {
   };
   submission?: SubmissionRecord;
 };
-
-const API_BASE = "http://localhost:8000";
 
 function normalizeStats(stats: SubmitResult["stats"]) {
   if (!stats) return null;

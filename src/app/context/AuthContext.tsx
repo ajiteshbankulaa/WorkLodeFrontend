@@ -8,9 +8,8 @@ import {
   useRef,
   useState,
 } from "react";
-import { clearApiCache } from "../lib/api";
+import { API_BASE, clearApiCache } from "../lib/api";
 
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
 const TOKEN_KEY = "worklode_access_token";
 const USER_KEY = "worklode_auth_user";
 

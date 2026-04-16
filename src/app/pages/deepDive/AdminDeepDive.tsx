@@ -1,8 +1,7 @@
 import { useMemo, useState } from "react";
 import { Shield, Upload, Presentation, TrendingUp, Users, Filter } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
-
-const API_BASE = "http://localhost:8000";
+import { API_BASE } from "../../lib/api";
 
 type AdminFilters = {
   dept: string;
