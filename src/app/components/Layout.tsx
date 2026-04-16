@@ -208,7 +208,7 @@ export function Layout() {
             </Link>
           </div>
 
-          <div className="text-xs text-muted">Â© 2026 / Student-Sourced Data</div>
+          <div className="text-xs text-muted">2026</div>
         </div>
       </footer>
 

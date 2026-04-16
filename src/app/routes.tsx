@@ -23,6 +23,7 @@ export const router = createBrowserRouter([
     children: [
       { index: true, lazy: lazyPage(() => import("./pages/Home"), "Home") },
       { path: "explore", lazy: lazyPage(() => import("./pages/Explore"), "Explore") },
+      { path: "explore/:dept", lazy: lazyPage(() => import("./pages/Explore"), "Explore") },
       { path: "course/:id", lazy: lazyPage(() => import("./pages/CourseProfile"), "CourseProfile") },
       { path: "plan", lazy: lazyPage(() => import("./pages/Plan"), "Plan") },
       { path: "feedback", lazy: lazyPage(() => import("./pages/Feedback"), "Feedback") },
