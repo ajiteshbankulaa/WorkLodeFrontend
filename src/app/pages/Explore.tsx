@@ -26,12 +26,20 @@ type ExploreFilters = {
 };
 type SubjectGroup = { dept: string; courses: CatalogCourse[]; avgHours: number | null; avgStdDev: number | null; avgResponses: number | null };
 type DepartmentCluster = { title: string; departments: Array<{ code: string; name: string }> };
+type PresetOption = { value: Exclude<ExplorePreset, "">; label: string };
 
 const DEFAULT_FILTERS: ExploreFilters = {
   departments: [], level: "", creditsMin: "", creditsMax: "", avgHoursMin: "", avgHoursMax: "", stdDevMin: "", stdDevMax: "", responsesMin: "", term: "", attribute: "", preset: "", sort: "relevance",
 };
 const SAVED_PRESET_KEY = "worklode_explore_saved_preset";
 const EXPLORE_PAGE_LIMIT = 1000;
+const PRESET_OPTIONS: PresetOption[] = [
+  { value: "heavy", label: "Heavy load" },
+  { value: "light", label: "Lighter load" },
+  { value: "high_variance", label: "Spiky workload" },
+  { value: "low_data", label: "Needs reports" },
+  { value: "high_confidence", label: "Strong signal" },
+];
 const DEPARTMENT_NAMES: Record<string, string> = {
   ADMN: "Administrative Courses",
   ARCH: "Architecture",
@@ -124,6 +132,10 @@ function buildCourseSummary(course: CatalogCourse) {
   return parts.length ? parts.join(" / ") : "No public workload signal yet";
 }
 
+function formatPresetLabel(preset: ExplorePreset) {
+  return PRESET_OPTIONS.find((option) => option.value === preset)?.label || preset.replaceAll("_", " ");
+}
+
 export function Explore() {
   const { dept } = useParams();
   const selectedDept = dept?.toUpperCase() || "";
@@ -183,7 +195,13 @@ export function Explore() {
   }, [groupedSubjects]);
 
   const activeFilterCount = filters.departments.length + Number(Boolean(filters.level)) + Number(Boolean(filters.creditsMin || filters.creditsMax)) + Number(Boolean(filters.avgHoursMin || filters.avgHoursMax)) + Number(Boolean(filters.stdDevMin || filters.stdDevMax)) + Number(Boolean(filters.responsesMin)) + Number(Boolean(filters.term)) + Number(Boolean(filters.attribute)) + Number(Boolean(filters.preset));
-  const filterSummary = [filters.departments.length ? filters.departments.join(", ") : "", filters.level ? `level ${filters.level}` : "", filters.preset ? filters.preset.replaceAll("_", " ") : "", filters.term ? formatAcademicTerm(filters.term) : ""].filter(Boolean).slice(0, 3).join(" / ");
+  const filterSummary = [
+    filters.departments.length ? filters.departments.join(", ") : "",
+    filters.level ? `${filters.level}-level` : "",
+    filters.preset ? formatPresetLabel(filters.preset) : "",
+    filters.term ? formatAcademicTerm(filters.term) : "",
+    filters.responsesMin ? `${filters.responsesMin}+ reports` : "",
+  ].filter(Boolean).slice(0, 4).join(" / ");
   const visibleDepartments = useMemo(() => new Set(departments.length ? departments : groupedSubjects.map((group) => group.dept)), [departments, groupedSubjects]);
   const directoryClusters = useMemo<DepartmentCluster[]>(() => {
     const seen = new Set<string>();
@@ -207,15 +225,6 @@ export function Explore() {
   const selectedDepartmentName = selectedDept ? DEPARTMENT_NAMES[selectedDept] || selectedDept : "";
 
 
-  const [hasInitializedTerm, setHasInitializedTerm] = useState(false);
-
-  useEffect(() => {
-    if (!hasInitializedTerm && terms.length > 0 && !filters.term) {
-      setFilters((current) => ({ ...current, term: terms[0] }));
-      setHasInitializedTerm(true);
-    }
-  }, [terms, filters.term, hasInitializedTerm]);
-
   return (
     <div className="min-h-screen bg-background pb-16">
       <section className="glass-panel border-x-0 border-t-0 rounded-none">
@@ -229,7 +238,7 @@ export function Explore() {
             <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr),auto,auto]">
               <div className="relative min-w-[280px]">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" size={16} />
-                <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search..." className="w-full rounded-xl nm-input px-10 py-2.5 text-sm outline-none" />
+                <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={selectedDept ? `Search ${selectedDept} courses...` : "Search departments or courses..."} className="w-full rounded-xl nm-input px-10 py-2.5 text-sm outline-none" />
                 {query && <button type="button" onClick={() => setQuery("")} className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-2 text-muted hover:bg-surface"><X size={14} /></button>}
               </div>
               <select value={filters.sort} onChange={(event) => setFilters((current) => ({ ...current, sort: event.target.value as SortOption }))} className="rounded-xl nm-button px-4 py-2.5 text-sm font-bold text-text outline-none">
@@ -242,21 +251,21 @@ export function Explore() {
             <span>{loading ? "Loading courses..." : selectedDept ? `${result?.total ?? 0} ${selectedDept} courses` : `${directoryClusters.reduce((sum, cluster) => sum + cluster.departments.length, 0)} departments / ${result?.total ?? 0} courses`}</span>
             {activeFilterCount > 0 && <><span className="h-1 w-1 rounded-full bg-border" /><span>{filterSummary || `${activeFilterCount} filters active`}</span><button type="button" onClick={() => setFilters(DEFAULT_FILTERS)} className="font-semibold text-text">Clear all</button></>}
           </div>
-          {filtersOpen && <div className="mt-4 rounded-2xl border border-border bg-surface p-4 shadow-sm"><div className="grid gap-4 xl:grid-cols-4">
+          {filtersOpen && <div className="mt-4 rounded-2xl border border-border bg-surface p-4 shadow-sm"><div className={`grid gap-4 ${selectedDept ? "xl:grid-cols-3" : "xl:grid-cols-4"}`}>
             {!selectedDept && <FilterBlock label="Departments">{departments.map((dept) => { const selected = filters.departments.includes(dept); return <label key={dept} className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-sm ${selected ? "border-primary bg-primary-light text-primary" : "border-border bg-surface text-text"}`}><input type="checkbox" checked={selected} onChange={() => setFilters((current) => ({ ...current, departments: selected ? current.departments.filter((value) => value !== dept) : [...current.departments, dept] }))} />{dept}</label>; })}</FilterBlock>}
             <div className="space-y-4">
               <LabeledSelect label="Course level" value={filters.level} onChange={(value) => setFilters((current) => ({ ...current, level: value }))} options={["", ...levels]} format={(value) => value || "Any"} />
               <RangeFields label="Credits" minValue={filters.creditsMin} maxValue={filters.creditsMax} onMinChange={(value) => setFilters((current) => ({ ...current, creditsMin: value }))} onMaxChange={(value) => setFilters((current) => ({ ...current, creditsMax: value }))} />
-              <TextField label="Minimum responses" value={filters.responsesMin} onChange={(value) => setFilters((current) => ({ ...current, responsesMin: value }))} />
+              <TextField label="Minimum student reports" value={filters.responsesMin} onChange={(value) => setFilters((current) => ({ ...current, responsesMin: value }))} />
             </div>
             <div className="space-y-4">
-              <RangeFields label="Avg hours / week" minValue={filters.avgHoursMin} maxValue={filters.avgHoursMax} onMinChange={(value) => setFilters((current) => ({ ...current, avgHoursMin: value }))} onMaxChange={(value) => setFilters((current) => ({ ...current, avgHoursMax: value }))} />
-              <RangeFields label="Variability" minValue={filters.stdDevMin} maxValue={filters.stdDevMax} onMinChange={(value) => setFilters((current) => ({ ...current, stdDevMin: value }))} onMaxChange={(value) => setFilters((current) => ({ ...current, stdDevMax: value }))} />
+              <RangeFields label="Workload hours / week" minValue={filters.avgHoursMin} maxValue={filters.avgHoursMax} onMinChange={(value) => setFilters((current) => ({ ...current, avgHoursMin: value }))} onMaxChange={(value) => setFilters((current) => ({ ...current, avgHoursMax: value }))} />
+              <RangeFields label="Pacing variability" minValue={filters.stdDevMin} maxValue={filters.stdDevMax} onMinChange={(value) => setFilters((current) => ({ ...current, stdDevMin: value }))} onMaxChange={(value) => setFilters((current) => ({ ...current, stdDevMax: value }))} />
             </div>
             <div className="space-y-4">
               <LabeledSelect label="Term availability" value={filters.term} onChange={(value) => setFilters((current) => ({ ...current, term: value }))} options={["", ...terms]} format={(value) => value ? formatAcademicTerm(value) : "Any"} />
               <LabeledSelect label="Requirement / tag" value={filters.attribute} onChange={(value) => setFilters((current) => ({ ...current, attribute: value }))} options={["", ...attributes]} format={(value) => value || "Any"} />
-              <div><div className="text-xs font-bold uppercase tracking-wide text-muted">Quick filters</div><div className="mt-2 flex flex-wrap gap-2">{["heavy", "light", "high_variance", "low_data", "high_confidence"].map((preset) => <button key={preset} type="button" onClick={() => setFilters((current) => ({ ...current, preset: current.preset === preset ? "" : (preset as ExplorePreset) }))} className={`rounded-full px-3 py-1.5 text-xs font-bold transition-all relative overflow-hidden ${filters.preset === preset ? "bg-primary text-white nm-raised liquid-glass" : "nm-button text-text-secondary"}`}>{preset.replaceAll("_", " ")}</button>)}</div></div>
+              <div><div className="text-xs font-bold uppercase tracking-wide text-muted">Planning presets</div><div className="mt-2 flex flex-wrap gap-2">{PRESET_OPTIONS.map((preset) => <button key={preset.value} type="button" onClick={() => setFilters((current) => ({ ...current, preset: current.preset === preset.value ? "" : preset.value }))} className={`rounded-full px-3 py-1.5 text-xs font-bold transition-all relative overflow-hidden ${filters.preset === preset.value ? "bg-primary text-white nm-raised liquid-glass" : "nm-button text-text-secondary"}`}>{preset.label}</button>)}</div></div>
             </div>
           </div><div className="mt-4 flex flex-wrap gap-3"><button type="button" onClick={() => { window.localStorage.setItem(SAVED_PRESET_KEY, JSON.stringify(filters)); setSavedPreset(filters); }} className="rounded-xl nm-button px-4 py-2 text-sm font-bold text-text">Save this view</button>{savedPreset && <button type="button" onClick={() => setFilters(savedPreset)} className="rounded-xl nm-button px-4 py-2 text-sm font-bold text-text">Apply saved view</button>}</div></div>}
         </div>
