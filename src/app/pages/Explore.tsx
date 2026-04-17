@@ -7,7 +7,7 @@ import type { CatalogCourse, ExploreResponse } from "../lib/catalog";
 import { average, formatAcademicTerm, formatCourseSignal, formatMetric, getBarWidth, getSubjectTheme } from "../lib/display";
 import { SkeletonGrid } from "../components/ui/SkeletonCard";
 import { FilterChip, MetricPill } from "../components/FilterChip";
-import { PageState } from "../components/PageState";
+import { LoadingState, PageState } from "../components/PageState";
 
 type SortOption = "relevance" | "workload_desc" | "workload_asc" | "variability_desc" | "responses_desc" | "alpha" | "course_number";
 type ExplorePreset = "" | "heavy" | "light" | "high_variance" | "low_data" | "high_confidence";
@@ -170,6 +170,7 @@ export function Explore() {
     const controller = new AbortController();
     const scopedFilters = selectedDept ? { ...filters, departments: [selectedDept] } : filters;
     const queryString = `${buildExploreQuery(debouncedQuery, scopedFilters)}&offset=${page * EXPLORE_PAGE_LIMIT}`;
+    setLoading(true);
     void requestJson<ExploreResponse>(`/catalog/explore?${queryString}`, { cacheTtlMs: 20_000, signal: controller.signal })
       .then((data) => { setResult(data); setLoadError(null); })
       .catch((error) => { if (!controller.signal.aborted) setLoadError(error instanceof Error ? error.message : "Failed to load course catalog"); })
@@ -329,7 +330,7 @@ export function Explore() {
       </section>
 
       <section className="container mx-auto px-4 py-4">
-        {loading && <SkeletonGrid count={9} />}
+        {loading && <ExploreLoading selectedDept={selectedDept} />}
         {!loading && loadError && <PageState tone="error" title="Could not load Explore" description={loadError} />}
         {!loading && !loadError && !courses.length && <PageState title="No courses matched this view" description="Try broadening the search or clearing a few filters." action={<button type="button" onClick={() => { setFilters(DEFAULT_FILTERS); setQuery(""); setDepartmentSearch(""); }} className="rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-white">Clear search and filters</button>} />}
         {!loading && !loadError && courses.length > 0 && !selectedDept && directoryClusters.length === 0 && <PageState title="No departments match" description="The current search or filters removed every department from the directory." action={<button type="button" onClick={() => { setFilters(DEFAULT_FILTERS); setDepartmentSearch(""); }} className="rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-white">Clear filters</button>} />}
@@ -385,6 +386,7 @@ export function Explore() {
 }
 
 function FilterBlock({ label, children }: { label: string; children: ReactNode }) { return <div><div className="text-xs font-bold uppercase tracking-wide text-muted">{label}</div><div className="mt-3 grid max-h-40 gap-2 overflow-auto pr-1">{children}</div></div>; }
+function ExploreLoading({ selectedDept }: { selectedDept: string }) { return <div className="space-y-4"><LoadingState label={selectedDept ? `Loading ${selectedDept} courses...` : "Loading course directory..."} /><SkeletonGrid count={9} /></div>; }
 function LabeledSelect({ label, value, onChange, options, format }: { label: string; value: string; onChange: (value: string) => void; options: string[]; format: (value: string) => string }) { return <label className="block"><div className="text-xs font-bold uppercase tracking-wide text-muted">{label}</div><select value={value} onChange={(event) => onChange(event.target.value)} className="mt-2 w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm outline-none focus:border-primary">{options.map((option) => <option key={option || "empty"} value={option}>{format(option)}</option>)}</select></label>; }
 function TextField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) { return <label className="block"><div className="text-xs font-bold uppercase tracking-wide text-muted">{label}</div><input value={value} onChange={(event) => onChange(event.target.value)} type="number" min="0" className="mt-2 w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm outline-none focus:border-primary" /></label>; }
 function RangeFields({ label, minValue, maxValue, onMinChange, onMaxChange }: { label: string; minValue: string; maxValue: string; onMinChange: (value: string) => void; onMaxChange: (value: string) => void }) { return <div><div className="text-xs font-bold uppercase tracking-wide text-muted">{label}</div><div className="mt-2 grid grid-cols-2 gap-2"><input type="number" min="0" value={minValue} onChange={(event) => onMinChange(event.target.value)} placeholder="Min" className="rounded-xl border border-border bg-surface px-3 py-2.5 text-sm outline-none focus:border-primary" /><input type="number" min="0" value={maxValue} onChange={(event) => onMaxChange(event.target.value)} placeholder="Max" className="rounded-xl border border-border bg-surface px-3 py-2.5 text-sm outline-none focus:border-primary" /></div></div>; }

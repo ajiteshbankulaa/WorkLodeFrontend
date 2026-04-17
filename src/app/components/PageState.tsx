@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { LoaderCircle } from "lucide-react";
 
 type PageStateProps = {
   title: string;
@@ -27,7 +28,15 @@ export function PageState({ title, description, tone = "neutral", action }: Page
 export function LoadingState({ label = "Loading..." }: { label?: string }) {
   return (
     <div className="rounded-2xl border border-border bg-surface px-6 py-8 text-center text-sm text-text-secondary shadow-sm">
-      {label}
+      <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-2xl border border-border bg-white text-primary shadow-sm">
+        <LoaderCircle size={22} className="animate-spin" />
+      </div>
+      <div className="mt-4 font-bold text-text">{label}</div>
+      <div className="mx-auto mt-4 flex max-w-40 items-center justify-center gap-1.5">
+        <span className="h-1.5 w-8 animate-pulse rounded-full bg-primary/70" />
+        <span className="h-1.5 w-8 animate-pulse rounded-full bg-secondary/70 [animation-delay:120ms]" />
+        <span className="h-1.5 w-8 animate-pulse rounded-full bg-emerald-500/70 [animation-delay:240ms]" />
+      </div>
     </div>
   );
 }

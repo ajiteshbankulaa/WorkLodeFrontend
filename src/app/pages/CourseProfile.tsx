@@ -7,6 +7,7 @@ import { requestJson } from "../lib/api";
 import type { CourseDetailResponse } from "../lib/catalog";
 import { loadCompareSelection, loadShortlist, saveCompareSelection, saveShortlist, toCompareSelection, toShortlistEntry } from "../lib/courseToolkit";
 import { formatAcademicTerm, formatCourseSignal, formatMetric, getBarWidth, getSubjectTheme } from "../lib/display";
+import { LoadingState } from "../components/PageState";
 
 type ProfileTab = "basic" | "graphs" | "details";
 type GraphMode = "bars" | "radar";
@@ -95,7 +96,7 @@ export function CourseProfile() {
     ];
   }, [course]);
 
-  if (loading) return <div className="p-10 text-center text-text-secondary">Loading course details...</div>;
+  if (loading) return <div className="min-h-screen bg-background px-4 py-10"><div className="container mx-auto max-w-3xl"><LoadingState label="Loading course details..." /></div></div>;
   if (error || !course) return <div className="p-10 text-center text-red-600">{error || "Course not found."}</div>;
   const courseKey = course.courseCode || course.id;
   const isShortlisted = shortlisted.some((entry) => entry.courseCode === courseKey);

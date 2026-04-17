@@ -7,6 +7,7 @@ import { usePlan } from "../context/PlanContext";
 import { requestJson } from "../lib/api";
 import type { CatalogCourse, CourseMeeting, ExploreResponse } from "../lib/catalog";
 import { formatAcademicTerm, getSubjectTheme } from "../lib/display";
+import { LoadingState } from "../components/PageState";
 
 type ImportDecision = { eventId: string; action: "use_suggested" | "match_candidate" | "keep_custom" | "discard"; courseCode?: string; crn?: string; section?: string };
 type ToolTab = "actions" | "compare" | "schedule";
@@ -90,7 +91,7 @@ export function Plan() {
 
   const customEventDays = ["M", "T", "W", "R", "F", "S", "U"];
 
-  if (loadingPlans && !activePlan) return <div className="p-10 text-center text-text-secondary">Loading planner...</div>;
+  if (loadingPlans && !activePlan) return <div className="min-h-screen bg-background px-4 py-10"><div className="container mx-auto max-w-3xl"><LoadingState label="Loading planner..." /></div></div>;
 
   const handleImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];

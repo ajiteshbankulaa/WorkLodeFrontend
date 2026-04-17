@@ -5,6 +5,7 @@ import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxi
 import { useAuth } from "../context/AuthContext";
 import { usePlan } from "../context/PlanContext";
 import { GoogleSignInButton } from "../components/GoogleSignInButton";
+import { LoadingState } from "../components/PageState";
 import { requestJson } from "../lib/api";
 import type { CatalogCourse, ExploreResponse } from "../lib/catalog";
 import { average, formatAcademicTerm, formatMetric } from "../lib/display";
@@ -319,7 +320,7 @@ export function Insights() {
     setInterventionState({ loading: false, error: null });
   }
 
-  if (loading || authLoading) return <div className="min-h-screen px-4 py-10"><div className="container mx-auto grid gap-4 lg:grid-cols-3">{Array.from({ length: 3 }).map((_, index) => <div key={index} className="h-40 animate-pulse rounded-[24px] border border-border bg-white" />)}</div></div>;
+  if (loading || authLoading) return <div className="min-h-screen px-4 py-10"><div className="container mx-auto space-y-4"><LoadingState label="Loading insights..." /><div className="grid gap-4 lg:grid-cols-3">{Array.from({ length: 3 }).map((_, index) => <div key={index} className="h-40 animate-pulse rounded-[24px] border border-border bg-white" />)}</div></div></div>;
   if (!isAuthenticated) return <div className="min-h-screen px-4 py-10"><div className="container mx-auto max-w-2xl"><div className="rounded-[28px] border border-border bg-white p-8 text-center shadow-sm"><div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-secondary/10 text-secondary"><Brain size={24} /></div><h1 className="mt-5 text-3xl font-black tracking-tight text-text">Insights requires sign-in</h1><p className="mt-2 text-sm text-text-secondary">Sign in with Google to open the planning analysis and admin insight workspace.</p><GoogleSignInButton className="mt-6 inline-flex border-slate-950 bg-slate-950 px-4 py-3 text-white hover:bg-slate-800" label="Sign in with Google" />{authError ? <div className="mt-6 text-sm text-red-600">{authError}</div> : null}</div></div></div>;
   if (error || !buckets) return <div className="p-10 text-center text-red-600">{error || "Failed to load insights."}</div>;
 
