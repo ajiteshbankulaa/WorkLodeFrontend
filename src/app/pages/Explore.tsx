@@ -202,15 +202,30 @@ export function Explore() {
   ].filter(Boolean).slice(0, 4).join(" / ");
   const filteredDepartmentCodes = useMemo(() => {
     const search = departmentSearch.trim().toLowerCase();
-    const source = groupedSubjects
-      .filter((group) => group.courses.length > 0)
-      .map((group) => group.dept);
+    const hasCourseNarrowing = Boolean(
+      debouncedQuery.trim() ||
+      filters.departments.length ||
+      filters.level ||
+      filters.creditsMin ||
+      filters.creditsMax ||
+      filters.avgHoursMin ||
+      filters.avgHoursMax ||
+      filters.stdDevMin ||
+      filters.stdDevMax ||
+      filters.responsesMin ||
+      filters.term ||
+      filters.attribute ||
+      filters.preset
+    );
+    const source = hasCourseNarrowing
+      ? groupedSubjects.filter((group) => group.courses.length > 0).map((group) => group.dept)
+      : departments;
     return source.filter((code) => {
       if (!search) return true;
       const name = DEPARTMENT_NAMES[code] || "";
       return code.toLowerCase().includes(search) || name.toLowerCase().includes(search);
     });
-  }, [groupedSubjects, departmentSearch]);
+  }, [debouncedQuery, filters, departments, groupedSubjects, departmentSearch]);
   const visibleDepartments = useMemo(() => new Set(filteredDepartmentCodes), [filteredDepartmentCodes]);
   const directoryClusters = useMemo<DepartmentCluster[]>(() => {
     const seen = new Set<string>();
