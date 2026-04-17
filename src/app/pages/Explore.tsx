@@ -6,6 +6,8 @@ import { requestJson } from "../lib/api";
 import type { CatalogCourse, ExploreResponse } from "../lib/catalog";
 import { average, formatAcademicTerm, formatCourseSignal, formatMetric, getBarWidth, getSubjectTheme } from "../lib/display";
 import { SkeletonGrid } from "../components/ui/SkeletonCard";
+import { FilterChip, MetricPill } from "../components/FilterChip";
+import { PageState } from "../components/PageState";
 
 type SortOption = "relevance" | "workload_desc" | "workload_asc" | "variability_desc" | "responses_desc" | "alpha" | "course_number";
 type ExplorePreset = "" | "heavy" | "light" | "high_variance" | "low_data" | "high_confidence";
@@ -150,8 +152,8 @@ export function Explore() {
   const [result, setResult] = useState<ExploreResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [expandedSubjects, setExpandedSubjects] = useState<Record<string, boolean>>({});
   const [expandedCourseId, setExpandedCourseId] = useState<string | null>(null);
+  const [departmentSearch, setDepartmentSearch] = useState("");
   const [page, setPage] = useState(0);
 
   useEffect(() => { setQuery(initialQuery); setDebouncedQuery(initialQuery); }, [initialQuery]);
@@ -190,10 +192,6 @@ export function Explore() {
       dept, courses: deptCourses, avgHours: average(deptCourses.map((course) => course.avgHours)), avgStdDev: average(deptCourses.map((course) => course.stdDev)), avgResponses: average(deptCourses.map((course) => course.responses)),
     })).sort((a, b) => a.dept.localeCompare(b.dept));
   }, [courses]);
-  useEffect(() => {
-    setExpandedSubjects((current) => Object.fromEntries(groupedSubjects.map((group) => [group.dept, current[group.dept] ?? false])));
-  }, [groupedSubjects]);
-
   const activeFilterCount = filters.departments.length + Number(Boolean(filters.level)) + Number(Boolean(filters.creditsMin || filters.creditsMax)) + Number(Boolean(filters.avgHoursMin || filters.avgHoursMax)) + Number(Boolean(filters.stdDevMin || filters.stdDevMax)) + Number(Boolean(filters.responsesMin)) + Number(Boolean(filters.term)) + Number(Boolean(filters.attribute)) + Number(Boolean(filters.preset));
   const filterSummary = [
     filters.departments.length ? filters.departments.join(", ") : "",
@@ -202,7 +200,16 @@ export function Explore() {
     filters.term ? formatAcademicTerm(filters.term) : "",
     filters.responsesMin ? `${filters.responsesMin}+ reports` : "",
   ].filter(Boolean).slice(0, 4).join(" / ");
-  const visibleDepartments = useMemo(() => new Set(departments.length ? departments : groupedSubjects.map((group) => group.dept)), [departments, groupedSubjects]);
+  const filteredDepartmentCodes = useMemo(() => {
+    const search = departmentSearch.trim().toLowerCase();
+    const source = departments.length ? departments : groupedSubjects.map((group) => group.dept);
+    return source.filter((code) => {
+      if (!search) return true;
+      const name = DEPARTMENT_NAMES[code] || "";
+      return code.toLowerCase().includes(search) || name.toLowerCase().includes(search);
+    });
+  }, [departments, groupedSubjects, departmentSearch]);
+  const visibleDepartments = useMemo(() => new Set(filteredDepartmentCodes), [filteredDepartmentCodes]);
   const directoryClusters = useMemo<DepartmentCluster[]>(() => {
     const seen = new Set<string>();
     const clusters = DEPARTMENT_CATEGORIES.map((category) => {
@@ -223,6 +230,21 @@ export function Explore() {
     return otherDepartments.length ? [...clusters, { title: "Other", departments: otherDepartments }] : clusters;
   }, [visibleDepartments]);
   const selectedDepartmentName = selectedDept ? DEPARTMENT_NAMES[selectedDept] || selectedDept : "";
+  const activeChips = [
+    ...filters.departments.map((department) => ({
+      key: `department-${department}`,
+      label: department,
+      remove: () => setFilters((current) => ({ ...current, departments: current.departments.filter((value) => value !== department) })),
+    })),
+    filters.level ? { key: "level", label: `${filters.level}-level`, remove: () => setFilters((current) => ({ ...current, level: "" })) } : null,
+    filters.creditsMin || filters.creditsMax ? { key: "credits", label: `Credits ${filters.creditsMin || "0"}-${filters.creditsMax || "any"}`, remove: () => setFilters((current) => ({ ...current, creditsMin: "", creditsMax: "" })) } : null,
+    filters.avgHoursMin || filters.avgHoursMax ? { key: "hours", label: `Hours ${filters.avgHoursMin || "0"}-${filters.avgHoursMax || "any"}`, remove: () => setFilters((current) => ({ ...current, avgHoursMin: "", avgHoursMax: "" })) } : null,
+    filters.stdDevMin || filters.stdDevMax ? { key: "variance", label: `Pacing ${filters.stdDevMin || "0"}-${filters.stdDevMax || "any"}`, remove: () => setFilters((current) => ({ ...current, stdDevMin: "", stdDevMax: "" })) } : null,
+    filters.responsesMin ? { key: "reports", label: `${filters.responsesMin}+ reports`, remove: () => setFilters((current) => ({ ...current, responsesMin: "" })) } : null,
+    filters.term ? { key: "term", label: formatAcademicTerm(filters.term), remove: () => setFilters((current) => ({ ...current, term: "" })) } : null,
+    filters.attribute ? { key: "attribute", label: filters.attribute, remove: () => setFilters((current) => ({ ...current, attribute: "" })) } : null,
+    filters.preset ? { key: "preset", label: formatPresetLabel(filters.preset), remove: () => setFilters((current) => ({ ...current, preset: "" })) } : null,
+  ].filter((chip): chip is { key: string; label: string; remove: () => void } => Boolean(chip));
 
 
   return (
@@ -251,6 +273,24 @@ export function Explore() {
             <span>{loading ? "Loading courses..." : selectedDept ? `${result?.total ?? 0} ${selectedDept} courses` : `${directoryClusters.reduce((sum, cluster) => sum + cluster.departments.length, 0)} departments / ${result?.total ?? 0} courses`}</span>
             {activeFilterCount > 0 && <><span className="h-1 w-1 rounded-full bg-border" /><span>{filterSummary || `${activeFilterCount} filters active`}</span><button type="button" onClick={() => setFilters(DEFAULT_FILTERS)} className="font-semibold text-text">Clear all</button></>}
           </div>
+          {!selectedDept && (
+            <div className="mt-3 max-w-md">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" size={15} />
+                <input
+                  value={departmentSearch}
+                  onChange={(event) => setDepartmentSearch(event.target.value)}
+                  placeholder="Find a department..."
+                  className="w-full rounded-xl border border-border bg-white py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-primary"
+                />
+              </div>
+            </div>
+          )}
+          {activeChips.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {activeChips.map((chip) => <FilterChip key={chip.key} onRemove={chip.remove}>{chip.label}</FilterChip>)}
+            </div>
+          )}
           {filtersOpen && <div className="mt-4 rounded-2xl border border-border bg-surface p-4 shadow-sm"><div className={`grid gap-4 ${selectedDept ? "xl:grid-cols-3" : "xl:grid-cols-4"}`}>
             {!selectedDept && <FilterBlock label="Departments">{departments.map((dept) => { const selected = filters.departments.includes(dept); return <label key={dept} className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-sm ${selected ? "border-primary bg-primary-light text-primary" : "border-border bg-surface text-text"}`}><input type="checkbox" checked={selected} onChange={() => setFilters((current) => ({ ...current, departments: selected ? current.departments.filter((value) => value !== dept) : [...current.departments, dept] }))} />{dept}</label>; })}</FilterBlock>}
             <div className="space-y-4">
@@ -273,9 +313,10 @@ export function Explore() {
 
       <section className="container mx-auto px-4 py-4">
         {loading && <SkeletonGrid count={9} />}
-        {!loading && loadError && <div className="rounded-2xl border border-red-200 bg-red-50 px-5 py-6 text-red-700">{loadError}</div>}
-        {!loading && !loadError && !courses.length && <div className="rounded-[28px] border border-border bg-surface px-6 py-10 text-center shadow-sm"><h2 className="text-xl font-bold text-text">No courses matched this view</h2><p className="mt-2 text-sm text-text-secondary">Try broadening the search or clearing a few filters.</p></div>}
-        {!loading && !loadError && courses.length > 0 && !selectedDept && <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
+        {!loading && loadError && <PageState tone="error" title="Could not load Explore" description={loadError} />}
+        {!loading && !loadError && !courses.length && <PageState title="No courses matched this view" description="Try broadening the search or clearing a few filters." action={<button type="button" onClick={() => { setFilters(DEFAULT_FILTERS); setQuery(""); setDepartmentSearch(""); }} className="rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-white">Clear search and filters</button>} />}
+        {!loading && !loadError && courses.length > 0 && !selectedDept && directoryClusters.length === 0 && <PageState title="No departments match" description="The current search or filters removed every department from the directory." action={<button type="button" onClick={() => { setFilters(DEFAULT_FILTERS); setDepartmentSearch(""); }} className="rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-white">Clear filters</button>} />}
+        {!loading && !loadError && courses.length > 0 && !selectedDept && directoryClusters.length > 0 && <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
           {directoryClusters.map((cluster) => (
             <section key={cluster.title} className="overflow-hidden rounded-xl border border-border bg-surface shadow-sm">
               <div className="border-b border-border bg-surface-2 px-4 py-3 text-sm font-black text-text">{cluster.title}</div>
@@ -289,7 +330,10 @@ export function Explore() {
                         <span className="font-mono text-lg font-black tracking-wide" style={{ color: theme.accentText }}>{department.code}</span>
                         <span className="truncate text-sm font-semibold text-text">{department.name}</span>
                       </div>
-                      <div className="mt-1 text-xs text-text-secondary">{group?.courses.length ?? 0} courses{group?.avgHours !== null && group?.avgHours !== undefined ? ` / ${group.avgHours}h avg load` : ""}</div>
+                      <div className="mt-1 flex flex-wrap gap-2 text-xs text-text-secondary">
+                        <MetricPill label="Courses" value={group?.courses.length ?? 0} />
+                        {group?.avgHours !== null && group?.avgHours !== undefined ? <MetricPill label="Avg" value={`${group.avgHours}h`} /> : null}
+                      </div>
                     </div>
                     <ArrowUpRight size={16} className="shrink-0 text-muted transition group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:text-primary" />
                   </Link>;
@@ -308,10 +352,10 @@ export function Explore() {
                   const inPlan = isInPlan(key);
                   return <div key={`${key}-${course.section || "course"}`} className="rounded-[22px] border border-border bg-surface" style={open ? { backgroundColor: theme.accentSoft, borderColor: theme.accentBorder } : undefined}>
                     <button type="button" onClick={() => setExpandedCourseId((current) => current === key ? null : key)} className="w-full px-3 py-3 text-left">
-                      <div className="flex items-start justify-between gap-3"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><div className="font-bold text-text">{course.code}</div><span className="rounded-full border border-border bg-white px-2 py-0.5 text-[11px] font-semibold text-text-secondary">{formatCourseSignal(course.trustTier, course.trustLabel)}</span></div><div className="mt-1 truncate text-sm text-text-secondary">{course.name}</div></div><div className="text-right"><div className="text-sm font-bold text-text">{formatMetric(course.avgHours, "h")}</div><div className="text-xs text-text-secondary">{formatMetric(course.stdDev, "h")} variance</div></div></div>
+                      <div className="flex items-start justify-between gap-3"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><div className="font-bold text-text">{course.code}</div><span className="rounded-full border border-border bg-white px-2 py-0.5 text-[11px] font-semibold text-text-secondary">{formatCourseSignal(course.trustTier, course.trustLabel)}</span></div><div className="mt-1 truncate text-sm text-text-secondary">{course.name}</div><div className="mt-2 flex flex-wrap gap-2"><MetricPill label="Credits" value={course.credits ?? "?"} /><MetricPill label="Load" value={formatMetric(course.avgHours, "h")} /><MetricPill label="Var" value={formatMetric(course.stdDev, "h")} /></div></div><div className="text-right"><div className="text-sm font-bold text-text">{formatMetric(course.avgHours, "h")}</div><div className="text-xs text-text-secondary">{course.responses === null ? "N/A" : `${course.responses} reports`}</div></div></div>
                       <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-200/70"><div className="h-full rounded-full" style={{ width: `${getBarWidth(course.avgHours, 20)}%`, backgroundColor: theme.accent }} /></div>
                     </button>
-                    {open && <div className="border-t border-border px-3 py-3"><div className="grid gap-3 md:grid-cols-2"><MiniBar label="Load" value={formatMetric(course.avgHours, "h")} width={getBarWidth(course.avgHours, 20)} accent={theme.accent} /><MiniBar label="Responses" value={course.responses === null ? "N/A" : String(course.responses)} width={getBarWidth(course.responses, 120)} accent={theme.accent} /></div><div className="mt-3 flex flex-wrap gap-2"><Chip>{course.credits ?? "?"} credits</Chip><Chip>{course.level}</Chip><Chip>{formatAcademicTerm(course.latestTerm)}</Chip>{course.attributes.slice(0, 2).map((attribute) => <Chip key={attribute}>{attribute}</Chip>)}</div><div className="mt-3 rounded-2xl border-l-4 nm-inset p-4 text-sm text-text-secondary" style={{ borderColor: theme.accent }}><div className="text-xs font-bold uppercase tracking-[0.14em] text-muted">Why this course</div><div className="mt-2 leading-relaxed">Load: {course.avgHours === null ? "unknown" : course.avgHours >= 15 ? "high commitment" : course.avgHours >= 8 ? "moderate load" : "lighter option"} / Variance: {course.stdDev === null ? "unknown" : course.stdDev >= 4 ? "spikier pacing" : "steadier pacing"} / Planner fit: {inPlan ? "already in your active plan" : course.avgHours !== null && course.avgHours <= 10 ? "good candidate to balance a heavy scenario" : "better paired with lighter supporting courses"}.</div></div><div className="mt-4 flex flex-col gap-2 sm:flex-row"><button type="button" onClick={() => addCourseFromCatalog(course)} disabled={inPlan} className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-primary px-3.5 py-2.5 text-sm font-bold text-white nm-raised disabled:bg-emerald-600 disabled:shadow-nm-inset">{inPlan ? <Check size={14} /> : <Plus size={14} />}{inPlan ? "In plan" : "Add to plan"}</button><Link to={`/course/${encodeURIComponent(key)}`} className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl nm-button px-3.5 py-2.5 text-sm font-bold text-text">More info<ArrowUpRight size={14} /></Link></div></div>}
+                    {open && <div className="border-t border-border px-3 py-3"><div className="grid gap-3 md:grid-cols-2"><MiniBar label="Workload" value={formatMetric(course.avgHours, "h")} width={getBarWidth(course.avgHours, 20)} accent={theme.accent} /><MiniBar label="Reports" value={course.responses === null ? "N/A" : String(course.responses)} width={getBarWidth(course.responses, 120)} accent={theme.accent} /></div><div className="mt-3 flex flex-wrap gap-2"><Chip>{course.credits ?? "?"} credits</Chip><Chip>{course.level}</Chip><Chip>{formatAcademicTerm(course.latestTerm)}</Chip>{course.attributes.slice(0, 2).map((attribute) => <Chip key={attribute}>{attribute}</Chip>)}</div><div className="mt-3 rounded-2xl border-l-4 nm-inset p-4 text-sm text-text-secondary" style={{ borderColor: theme.accent }}><div className="text-xs font-bold uppercase tracking-[0.14em] text-muted">Planning read</div><div className="mt-2 leading-relaxed">{buildCourseSummary(course)}. Planner fit: {inPlan ? "already in your active plan" : course.avgHours !== null && course.avgHours <= 10 ? "good candidate to balance a heavy scenario" : "better paired with lighter supporting courses"}.</div></div><div className="sticky bottom-2 mt-4 flex flex-col gap-2 rounded-2xl border border-border bg-white/95 p-2 shadow-sm sm:flex-row"><button type="button" onClick={() => addCourseFromCatalog(course)} disabled={inPlan} className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-primary px-3.5 py-2.5 text-sm font-bold text-white disabled:bg-emerald-600">{inPlan ? <Check size={14} /> : <Plus size={14} />}{inPlan ? "In plan" : "Add to plan"}</button><Link to={`/course/${encodeURIComponent(key)}`} className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-border bg-white px-3.5 py-2.5 text-sm font-bold text-text">More info<ArrowUpRight size={14} /></Link></div></div>}
                   </div>;
                 })}
               </div>;

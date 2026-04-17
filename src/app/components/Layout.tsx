@@ -107,10 +107,10 @@ export function Layout() {
           <button
             type="button"
             onClick={togglePanel}
-            className="hidden items-center gap-2 rounded-full nm-button px-4 py-2 text-sm font-bold text-text-secondary md:inline-flex"
+            aria-label="Theme"
+            className="hidden h-9 w-9 items-center justify-center rounded-full border border-border bg-white text-text-secondary shadow-sm transition hover:border-primary/30 hover:text-primary md:inline-flex"
           >
             <Palette size={15} />
-            Theme
           </button>
 
           <button

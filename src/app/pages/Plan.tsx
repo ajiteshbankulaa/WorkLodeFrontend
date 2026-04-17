@@ -10,6 +10,7 @@ import { formatAcademicTerm, getSubjectTheme } from "../lib/display";
 
 type ImportDecision = { eventId: string; action: "use_suggested" | "match_candidate" | "keep_custom" | "discard"; courseCode?: string; crn?: string; section?: string };
 type ToolTab = "actions" | "compare" | "schedule";
+type ImportReviewTab = "matched" | "ambiguous" | "unmatched";
 
 function formatMeetingTime(value: number) {
   if (value < 0) return "TBD";
@@ -49,6 +50,7 @@ export function Plan() {
   const [customEnd, setCustomEnd] = useState("1030");
   const [customNotes, setCustomNotes] = useState("");
   const [toolTab, setToolTab] = useState<ToolTab>("actions");
+  const [importReviewTab, setImportReviewTab] = useState<ImportReviewTab>("ambiguous");
 
   useEffect(() => { setPlanName(activePlan?.name || ""); }, [activePlan?.name]);
   useEffect(() => {
@@ -89,6 +91,16 @@ export function Plan() {
   }, [weeklySchedule]);
 
   const customEventDays = ["M", "T", "W", "R", "F", "S", "U"];
+  const customStartValue = Number(customStart);
+  const customEndValue = Number(customEnd);
+  const customTimeError = Number.isFinite(customStartValue) && Number.isFinite(customEndValue) && customEndValue <= customStartValue
+    ? "End time must be after start time."
+    : "";
+  const importGroups = useMemo(() => ({
+    matched: importPreview?.items.filter((item) => item.matchStatus === "matched") ?? [],
+    ambiguous: importPreview?.items.filter((item) => item.matchStatus === "ambiguous") ?? [],
+    unmatched: importPreview?.items.filter((item) => item.matchStatus === "unmatched") ?? [],
+  }), [importPreview]);
 
   if (loadingPlans && !activePlan) return <div className="p-10 text-center text-text-secondary">Loading planner...</div>;
 
@@ -125,7 +137,7 @@ export function Plan() {
   const addPlannerCustomEvent = () => {
     const start = Number(customStart);
     const end = Number(customEnd);
-    if (!customTitle.trim() || !customDays.length) return;
+    if (!customTitle.trim() || !customDays.length || end <= start) return;
     addCustomEvent({
       title: customTitle,
       description: customNotes,
@@ -143,22 +155,22 @@ export function Plan() {
 
   return (
     <div className="min-h-screen bg-background pb-16" style={{ backgroundImage: "var(--page-gradient)" }}>
-      <section className="border-b border-border bg-[var(--hero-gradient)]">
-        <div className="container mx-auto max-w-6xl px-4 py-7">
-          <div className="rounded-[32px] border border-border bg-white/92 p-6 shadow-sm">
-            <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+      <section className="border-b border-border bg-surface">
+        <div className="container mx-auto max-w-6xl px-4 py-4">
+          <div className="rounded-2xl border border-border bg-white p-4 shadow-sm">
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
               <div className="min-w-0 flex-1">
                 <div className="text-xs font-bold uppercase tracking-[0.16em] text-muted">Planner</div>
-                <input value={planName} onChange={(event) => setPlanName(event.target.value)} onBlur={() => renameActivePlan(planName)} className="mt-2 w-full bg-transparent text-4xl font-black tracking-tight text-text outline-none" />
+                <input value={planName} onChange={(event) => setPlanName(event.target.value)} onBlur={() => renameActivePlan(planName)} className="mt-1 w-full bg-transparent text-3xl font-black tracking-tight text-text outline-none" />
                 <div className="mt-2 text-sm text-text-secondary">{formatAcademicTerm(activePlan?.termCode || "latest")} / {plans.length} scenario{plans.length === 1 ? "" : "s"}</div>
-                <div className="mt-5 flex flex-wrap items-stretch gap-4">
+                <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
                   <SummaryCard label="Credits" value={summary.totalCredits} />
                   <SummaryCard label="Outside Load" value={summary.totalOutsideHours.toFixed(1)} />
                   <SummaryCard label="Total Load" value={summary.totalAcademicLoad.toFixed(1)} />
-                  <SummaryCard label="Meetings" value={scheduleSummary.totalMeetings} />
-                  <div className={`flex-[2] min-w-[200px] rounded-[22px] border p-5 flex flex-col justify-center ${summary.warnings.length ? "border-amber-200 bg-amber-50 text-amber-900" : "border-emerald-200 bg-emerald-50 text-emerald-800"}`}>
+                  <SummaryCard label="Conflicts" value={diagnostics.conflicts.length} />
+                  <div className={`rounded-2xl border p-4 ${summary.warnings.length || diagnostics.conflicts.length ? "border-amber-200 bg-amber-50 text-amber-900" : "border-emerald-200 bg-emerald-50 text-emerald-800"}`}>
                     <div className="text-[11px] font-bold uppercase tracking-wider opacity-80">Checkpoint</div>
-                    <div className="mt-1 text-xl font-black leading-tight sm:text-2xl">{diagnostics.checkpointLabel}</div>
+                    <div className="mt-1 text-lg font-black leading-tight">{diagnostics.checkpointLabel}</div>
                     <div className="mt-2 text-sm font-semibold opacity-90">Overall Score: {diagnostics.scenarioScore}/100</div>
                   </div>
                 </div>
@@ -168,15 +180,16 @@ export function Plan() {
                 <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-primary px-3.5 py-2.5 text-sm font-bold text-white hover:bg-primary-hover"><FileUp size={15} />Import<input type="file" accept=".ics,text/calendar" className="hidden" onChange={handleImportFile} /></label>
                 <button type="button" onClick={() => createVariant()} className="inline-flex items-center gap-2 rounded-xl border border-border bg-surface px-3.5 py-2.5 text-sm font-bold text-text shadow-sm transition hover:-translate-y-0.5 hover:border-primary/35 hover:bg-surface-2"><Plus size={15} />New scenario</button>
                 <button type="button" onClick={() => void saveActivePlan()} disabled={savingPlan} className="inline-flex items-center gap-2 rounded-xl border border-border bg-surface px-3.5 py-2.5 text-sm font-bold text-text shadow-sm transition hover:-translate-y-0.5 hover:border-primary/35 hover:bg-surface-2 disabled:opacity-60"><Save size={15} />{savingPlan ? "Saving..." : "Save"}</button>
+                <button type="button" onClick={() => { setToolTab("compare"); setComparePlanIds(comparePlanIds.length === 2 ? comparePlanIds : [plans[0]?.id || "", plans[1]?.id || activePlan?.id || ""]); }} className="inline-flex items-center gap-2 rounded-xl border border-border bg-surface px-3.5 py-2.5 text-sm font-bold text-text shadow-sm transition hover:-translate-y-0.5 hover:border-primary/35 hover:bg-surface-2"><AlertTriangle size={15} />Compare</button>
                 <button type="button" onClick={() => setSettingsOpen((open) => !open)} className="inline-flex items-center gap-2 rounded-xl border border-border bg-surface px-3.5 py-2.5 text-sm font-bold text-text shadow-sm transition hover:-translate-y-0.5 hover:border-primary/35 hover:bg-surface-2"><Sparkles size={15} />Settings</button>
               </div>
             </div>
 
-            <div className="mt-5 grid gap-3 lg:grid-cols-[minmax(0,1fr),auto]">
+            <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr),auto]">
               <select value={activePlan?.id || ""} onChange={(event) => selectPlan(event.target.value)} className="rounded-2xl border border-border bg-surface px-4 py-3 text-sm font-semibold text-text outline-none focus:border-primary">
                 {plans.map((plan) => <option key={plan.id} value={plan.id}>{plan.name}</option>)}
               </select>
-              <div className="rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-text-secondary">Focus: load, risk balance, meetings, and pacing.</div>
+                <div className="rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-text-secondary">Meetings: {scheduleSummary.totalMeetings} / first start {scheduleSummary.firstStart}</div>
             </div>
 
             {settingsOpen && <div className="mt-4 space-y-4 rounded-[24px] border border-border bg-surface p-4"><div className="flex flex-wrap gap-3"><button type="button" onClick={duplicateVariant} className="inline-flex items-center gap-2 rounded-xl border border-border bg-white px-3 py-2 text-sm font-semibold text-text"><CopyPlus size={15} />Duplicate scenario</button><button type="button" onClick={openPanel} className="inline-flex items-center gap-2 rounded-xl border border-border bg-white px-3 py-2 text-sm font-semibold text-text"><Palette size={15} />Appearance</button><div className="text-sm text-text-secondary">Scenario tools live here so the main planner stays focused on the schedule.</div></div><label className="block"><div className="mb-1.5 text-[11px] font-bold uppercase tracking-[0.14em] text-muted">Scenario notes</div><textarea value={activePlan?.notes || ""} onChange={(event) => updatePlanNotes(event.target.value)} rows={3} className="w-full rounded-2xl border border-border bg-white px-3 py-3 text-sm text-text-secondary outline-none focus:border-primary" placeholder="Advising notes, non-negotiables, internship timing, commute constraints..." /></label></div>}
@@ -292,13 +305,21 @@ export function Plan() {
                   <SummaryCard label="Unmatched" value={importPreview.summary.unmatched} compact />
                   <SummaryCard label="Events" value={importPreview.summary.total} compact />
                 </div>
+                <div className="flex flex-wrap gap-2">
+                  {(["matched", "ambiguous", "unmatched"] as ImportReviewTab[]).map((tab) => (
+                    <button key={tab} type="button" onClick={() => setImportReviewTab(tab)} className={`rounded-full px-3 py-1.5 text-xs font-bold capitalize ${importReviewTab === tab ? "bg-primary text-white" : "border border-border bg-white text-text-secondary"}`}>
+                      {tab} ({importGroups[tab].length})
+                    </button>
+                  ))}
+                </div>
                 <div className="rounded-[22px] border border-border bg-surface p-3">
                   <div className="mb-3 flex items-center gap-2 text-sm font-bold text-text">
                     <CheckCircle2 size={16} />
                     Import review
                   </div>
                   <div className="space-y-3">
-                    {importPreview.items.map((item) => <div key={item.eventId} className="rounded-2xl border border-border bg-white p-3"><div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between"><div><div className="font-semibold text-text">{item.title}</div><div className="mt-1 text-xs text-text-secondary">{meetingLabel(item.meeting)}</div><div className="mt-1 text-xs text-text-secondary">{item.matchStatus} / confidence {item.confidence}</div></div><div className="min-w-[220px]"><div className="mb-1.5 text-[11px] font-bold uppercase tracking-[0.14em] text-muted">Decision</div><select value={importDecisions[item.eventId]?.action || ""} onChange={(event) => setImportDecisions((current) => ({ ...current, [item.eventId]: { eventId: item.eventId, action: event.target.value as ImportDecision["action"] } }))} className="w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-primary"><option value="">Use default</option>{item.matchStatus === "matched" && <option value="use_suggested">Use suggested match</option>}{item.matchStatus === "ambiguous" && <option value="match_candidate">Choose candidate</option>}<option value="keep_custom">Keep as custom event</option><option value="discard">Discard</option></select></div></div></div>)}
+                    {importGroups[importReviewTab].map((item) => <div key={item.eventId} className="rounded-2xl border border-border bg-white p-3"><div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between"><div><div className="font-semibold text-text">{item.title}</div><div className="mt-1 text-xs text-text-secondary">{meetingLabel(item.meeting)}</div><div className="mt-1 text-xs text-text-secondary">{item.matchStatus} / confidence {item.confidence}</div>{item.candidates?.length ? <div className="mt-2 text-xs text-text-secondary">Candidates: {item.candidates.map((candidate) => candidate.label).join(", ")}</div> : null}</div><div className="min-w-[220px]"><div className="mb-1.5 text-[11px] font-bold uppercase tracking-[0.14em] text-muted">Decision</div><select value={importDecisions[item.eventId]?.action || ""} onChange={(event) => setImportDecisions((current) => ({ ...current, [item.eventId]: { eventId: item.eventId, action: event.target.value as ImportDecision["action"] } }))} className="w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-primary"><option value="">Use default</option>{item.matchStatus === "matched" && <option value="use_suggested">Use suggested match</option>}{item.matchStatus === "ambiguous" && <option value="match_candidate">Choose candidate</option>}<option value="keep_custom">Keep as custom event</option><option value="discard">Discard</option></select></div></div></div>)}
+                    {importGroups[importReviewTab].length === 0 && <div className="rounded-2xl border border-dashed border-border bg-white px-4 py-5 text-sm text-text-secondary">No {importReviewTab} events in this import.</div>}
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -329,8 +350,9 @@ export function Plan() {
                 <input value={customStart} onChange={(event) => setCustomStart(event.target.value)} placeholder="0900" className="rounded-xl border border-border bg-white px-3 py-2.5 text-sm outline-none focus:border-primary" />
                 <input value={customEnd} onChange={(event) => setCustomEnd(event.target.value)} placeholder="1030" className="rounded-xl border border-border bg-white px-3 py-2.5 text-sm outline-none focus:border-primary" />
               </div>
+              {customTimeError && <div className="mt-2 text-sm text-red-600">{customTimeError}</div>}
               <textarea value={customNotes} onChange={(event) => setCustomNotes(event.target.value)} rows={3} placeholder="Optional notes" className="mt-3 w-full rounded-xl border border-border bg-white px-3 py-2.5 text-sm outline-none focus:border-primary" />
-              <button type="button" onClick={addPlannerCustomEvent} disabled={!customTitle.trim() || customDays.length === 0} className="mt-3 rounded-xl bg-primary px-3.5 py-2.5 text-sm font-bold text-white disabled:opacity-60">Add event</button>
+              <button type="button" onClick={addPlannerCustomEvent} disabled={!customTitle.trim() || customDays.length === 0 || Boolean(customTimeError)} className="mt-3 rounded-xl bg-primary px-3.5 py-2.5 text-sm font-bold text-white disabled:opacity-60">Add event</button>
             </AccordionCard>
             </>}
 
@@ -348,7 +370,7 @@ export function Plan() {
   );
 }
 
-function SummaryCard({ label, value, compact = false }: { label: string; value: string | number; compact?: boolean }) { return <div className="flex-1 min-w-[130px] rounded-[22px] border border-border bg-surface p-5 flex flex-col justify-center shadow-sm"><div className="text-[11px] font-bold uppercase tracking-wider text-muted">{label}</div><div className={`mt-1 font-black text-text ${compact ? "text-xl" : "text-3xl"}`}>{value}</div></div>; }
+function SummaryCard({ label, value, compact = false }: { label: string; value: string | number; compact?: boolean }) { return <div className="rounded-2xl border border-border bg-surface p-4 shadow-sm"><div className="text-[11px] font-bold uppercase tracking-wider text-muted">{label}</div><div className={`mt-1 font-black text-text ${compact ? "text-xl" : "text-2xl"}`}>{value}</div></div>; }
 function CompareMetric({ label, value }: { label: string; value: string | number }) { return <div className="rounded-2xl border border-border bg-white px-4 py-3"><div className="text-[11px] font-bold uppercase tracking-[0.14em] text-muted">{label}</div><div className="mt-1 text-2xl font-black text-text">{value}</div></div>; }
 function Pill({ children, tone }: { children: ReactNode; tone?: { accentBorder: string; accentText: string } | null }) { return <span className="rounded-full border px-2.5 py-0.5 text-xs font-semibold text-text-secondary" style={tone ? { borderColor: tone.accentBorder, backgroundColor: "rgba(255,255,255,0.68)", color: tone.accentText } : undefined}>{children}</span>; }
 function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) { return <button type="button" onClick={onClick} className={`rounded-2xl border px-3 py-2.5 text-sm font-bold transition-all ${active ? "border-primary bg-primary text-white shadow-sm" : "border-border bg-white text-text-secondary shadow-sm hover:border-primary/35 hover:text-text"}`}>{children}</button>; }

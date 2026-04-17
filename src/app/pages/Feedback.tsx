@@ -4,7 +4,7 @@ import { Link } from "react-router";
 import { AnimatePresence, motion } from "motion/react";
 import { GoogleSignInButton } from "../components/GoogleSignInButton";
 import { useAuth } from "../context/AuthContext";
-import { API_BASE } from "../lib/api";
+import { requestJson } from "../lib/api";
 
 type ExtractedInfo = {
   exams: { label: string; date?: string; time?: string }[];
@@ -104,9 +104,7 @@ export function Feedback() {
     const timeout = window.setTimeout(async () => {
       try {
         setSearching(true);
-        const res = await fetch(`${API_BASE}/catalog/search?q=${encodeURIComponent(searchQuery.trim())}&limit=12`, { signal: controller.signal });
-        if (!res.ok) throw new Error(`Failed to search courses (${res.status})`);
-        const data = (await res.json()) as Array<{ course_code: string; term?: string; code: string; name: string; avgHours?: number | null; stdDev?: number | null; responses?: number | null; subj?: string }>;
+        const data = await requestJson<Array<{ course_code: string; term?: string; code: string; name: string; avgHours?: number | null; stdDev?: number | null; responses?: number | null; subj?: string }>>(`/catalog/search?q=${encodeURIComponent(searchQuery.trim())}&limit=12`, { signal: controller.signal });
         if (ignore) return;
         setSearchResults(
           data.map((course) => ({
@@ -147,11 +145,7 @@ export function Feedback() {
     async function loadHistory() {
       try {
         setLoadingHistory(true);
-        const res = await fetch(`${API_BASE}/feedback/workload/history?limit=8`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!res.ok) throw new Error(`Failed to load submission history (${res.status})`);
-        const data = (await res.json()) as { items?: SubmissionRecord[] };
+        const data = await requestJson<{ items?: SubmissionRecord[] }>("/feedback/workload/history?limit=8", { token });
         if (!ignore) {
           setHistory(Array.isArray(data.items) ? data.items : []);
           setHistoryError(null);
@@ -206,12 +200,7 @@ export function Feedback() {
   const handleDelete = async (submissionId: string) => {
     if (!token) return;
     try {
-      const res = await fetch(`${API_BASE}/feedback/workload/${submissionId}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data?.detail || `Failed to delete submission (${res.status})`);
+      await requestJson<Record<string, unknown>>(`/feedback/workload/${submissionId}`, { method: "DELETE", token });
       setHistory((current) => current.filter((item) => item.id !== submissionId));
       if (editingSubmissionId === submissionId) resetForm();
       setHistoryError(null);
@@ -236,26 +225,12 @@ export function Feedback() {
         comment,
         extracted,
       };
-      const res = await fetch(
-        editingSubmissionId ? `${API_BASE}/feedback/workload/${editingSubmissionId}` : `${API_BASE}/feedback/workload`,
-        {
-          method: editingSubmissionId ? "PATCH" : "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify(payload),
-        }
-      );
-      const rawText = await res.text();
-      let data: SubmitResult | { detail?: string } | null = null;
-      try {
-        data = rawText ? JSON.parse(rawText) : null;
-      } catch {
-        data = { detail: rawText || "Non-JSON response from server" };
-      }
-      if (!res.ok) throw new Error((data as { detail?: string } | null)?.detail || `Failed to submit feedback (${res.status})`);
-      const typed = data as SubmitResult;
+      const typed = await requestJson<SubmitResult>(editingSubmissionId ? `/feedback/workload/${editingSubmissionId}` : "/feedback/workload", {
+        method: editingSubmissionId ? "PATCH" : "POST",
+        token,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
       setSubmitResult(typed);
       if (typed.submission?.id) {
         setHistory((current) => [typed.submission!, ...current.filter((item) => item.id !== typed.submission!.id)].slice(0, 8));
@@ -285,7 +260,7 @@ export function Feedback() {
           </div>
         </div>
         <div className="rounded-2xl border border-border bg-white px-4 py-3 text-sm text-text-secondary shadow-sm">
-          Search for a course, submit one clean report, then edit or retract it from recent history if needed.
+          Choose a course, report workload, then confirm the impact on course stats.
         </div>
       </div>
 
@@ -298,6 +273,11 @@ export function Feedback() {
           <AnimatePresence mode="wait">
             {step === 1 && (
               <motion.div key="step1" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-8 pt-4">
+                <div>
+                  <div className="text-xs font-bold uppercase tracking-[0.16em] text-muted">Step 1</div>
+                  <h2 className="mt-1 text-2xl font-black text-text">Choose course</h2>
+                </div>
+
                 <div className="rounded-2xl border border-border bg-surface-2 p-4">
                   {isAuthenticated && user ? (
                     <div className="text-sm text-text-secondary">Signed in as <span className="font-bold text-text">{user.email}</span>. Feedback submissions use your Google-backed Worklode session.</div>
@@ -359,13 +339,18 @@ export function Feedback() {
                 </div>
 
                 <button type="button" disabled={!canAdvance} onClick={() => setStep(2)} className="w-full rounded-xl bg-primary py-4 font-bold text-white transition-all hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50">
-                  {editingSubmissionId ? "Continue Edit" : "Next Step"}
+                  {editingSubmissionId ? "Continue Edit" : "Report workload"}
                 </button>
               </motion.div>
             )}
 
             {step === 2 && (
               <motion.form key="step2" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-8 pt-4" onSubmit={handleSubmit}>
+                <div>
+                  <div className="text-xs font-bold uppercase tracking-[0.16em] text-muted">Step 2</div>
+                  <h2 className="mt-1 text-2xl font-black text-text">Report workload</h2>
+                </div>
+
                 <div className="rounded-2xl border border-border bg-white p-4">
                   <div className="text-xs font-bold uppercase tracking-[0.16em] text-muted">{editingSubmissionId ? "Editing submission" : "Selected course"}</div>
                   <div className="mt-2 text-lg font-black text-text">{selectedCourse?.code || "No course selected"}</div>
@@ -374,7 +359,7 @@ export function Feedback() {
 
                 <div>
                   <label className="mb-6 flex items-end justify-between text-sm font-bold text-text">
-                    <span>Weekly average</span>
+                    <span>Weekly average hours</span>
                     <span className="font-mono text-3xl font-black text-primary">{hours} <span className="text-sm font-bold uppercase text-muted">hrs</span></span>
                   </label>
                   <input type="range" min="0" max="40" step="0.5" value={hours} onChange={(event) => setHours(Number(event.target.value))} className="h-2 w-full cursor-pointer appearance-none rounded-lg bg-surface-2 accent-primary" />
@@ -394,12 +379,12 @@ export function Feedback() {
 
                 <button type="button" onClick={() => setPeakWeek((current) => !current)} className="flex w-full items-center gap-3 rounded-xl border border-border p-4 text-left transition-colors hover:bg-surface-2">
                   <div className={`flex h-5 w-5 items-center justify-center rounded border transition-colors ${peakWeek ? "border-primary bg-primary text-white" : "border-muted bg-white"}`}>{peakWeek && <Check size={14} />}</div>
-                  <span className="text-sm font-medium text-text-secondary">Was there a specific peak week significantly above average?</span>
+                  <span className="text-sm font-medium text-text-secondary">Workload spike: was there a specific week significantly above average?</span>
                 </button>
 
                 <div>
-                  <label className="mb-3 block text-sm font-bold text-text">Comment</label>
-                  <textarea value={comment} onChange={(event) => setComment(event.target.value)} rows={4} className="w-full resize-none rounded-xl border border-transparent bg-surface-2 p-4 font-medium text-text outline-none transition-all focus:border-primary focus:bg-white" placeholder="Anything future students should know?" />
+                  <label className="mb-3 block text-sm font-bold text-text">Short advice for future students</label>
+                  <textarea value={comment} onChange={(event) => setComment(event.target.value)} rows={4} className="w-full resize-none rounded-xl border border-transparent bg-surface-2 p-4 font-medium text-text outline-none transition-all focus:border-primary focus:bg-white" placeholder="What would help someone plan for this course?" />
                 </div>
 
                 <div className="flex gap-3 rounded-xl border border-blue-100 bg-blue-50 p-4 text-xs leading-relaxed text-blue-700">
@@ -421,6 +406,7 @@ export function Feedback() {
             {step === 3 && (
               <motion.div key="step3" initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} className="py-8 pt-6 text-center">
                 <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-full bg-emerald-100 text-emerald-600"><Check size={36} /></div>
+                <div className="mb-2 text-xs font-bold uppercase tracking-[0.16em] text-muted">Step 3</div>
                 <h2 className="mb-3 text-2xl font-black text-text">Feedback saved</h2>
                 <p className="mx-auto mb-6 max-w-md leading-relaxed text-text-secondary">Your report was saved and the per-course stats were recomputed.</p>
                 {prettyStats && (
@@ -475,14 +461,6 @@ export function Feedback() {
                   </div>
                 ))
               )}
-            </div>
-          </section>
-
-          <section className="rounded-2xl border border-border bg-white p-5 shadow-sm">
-            <div className="text-xs font-bold uppercase tracking-[0.16em] text-muted">Signal roadmap</div>
-            <div className="mt-3 space-y-3 text-sm text-text-secondary">
-              <div className="rounded-2xl border border-border bg-surface p-3">Submission history, edit, and retract flows now stay on this page instead of forcing a re-submit.</div>
-              <div className="rounded-2xl border border-border bg-surface p-3">The next step is to reuse feedback structure in course pages and planner warnings.</div>
             </div>
           </section>
         </aside>

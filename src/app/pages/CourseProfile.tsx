@@ -5,10 +5,11 @@ import { Bar, BarChart, CartesianGrid, PolarAngleAxis, PolarGrid, Radar as Radar
 import { usePlan } from "../context/PlanContext";
 import { requestJson } from "../lib/api";
 import type { CourseDetailResponse } from "../lib/catalog";
+import { LoadingState, PageState } from "../components/PageState";
 import { loadCompareSelection, loadShortlist, saveCompareSelection, saveShortlist, toCompareSelection, toShortlistEntry } from "../lib/courseToolkit";
 import { formatAcademicTerm, formatCourseSignal, formatMetric, getBarWidth, getSubjectTheme } from "../lib/display";
 
-type ProfileTab = "basic" | "graphs" | "details";
+type ProfileTab = "overview" | "workload" | "sections" | "details";
 type GraphMode = "bars" | "radar";
 
 function getLoadSummary(course: CourseDetailResponse) {
@@ -38,7 +39,7 @@ export function CourseProfile() {
   const [sections, setSections] = useState<Array<{ crn: string; sec: string; title: string; timeslots: Array<{ instructor?: string }> }>>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<ProfileTab>("basic");
+  const [tab, setTab] = useState<ProfileTab>("overview");
   const [graphMode, setGraphMode] = useState<GraphMode>("bars");
   const [shortlisted, setShortlisted] = useState(() => loadShortlist());
   const [compareSelection, setCompareSelection] = useState(() => loadCompareSelection());
@@ -95,23 +96,25 @@ export function CourseProfile() {
     ];
   }, [course]);
 
-  if (loading) return <div className="p-10 text-center text-text-secondary">Loading course details...</div>;
-  if (error || !course) return <div className="p-10 text-center text-red-600">{error || "Course not found."}</div>;
+  if (loading) return <div className="min-h-screen bg-background px-4 py-10"><div className="container mx-auto max-w-3xl"><LoadingState label="Loading course details..." /></div></div>;
+  if (error || !course) return <div className="min-h-screen bg-background px-4 py-10"><div className="container mx-auto max-w-3xl"><PageState tone="error" title="Course could not load" description={error || "Course not found."} action={<Link to="/explore" className="rounded-xl bg-primary px-4 py-2 text-sm font-bold text-white">Back to Explore</Link>} /></div></div>;
   const courseKey = course.courseCode || course.id;
   const isShortlisted = shortlisted.some((entry) => entry.courseCode === courseKey);
   const inCompare = compareSelection.some((entry) => entry.courseCode === courseKey);
+  const backTarget = course.dept ? `/explore/${encodeURIComponent(course.dept)}` : "/explore";
 
   return (
     <div className="min-h-screen bg-background pb-20" style={{ backgroundImage: "var(--page-gradient)" }}>
       <div className="border-b border-border bg-[var(--hero-gradient)]">
         <div className="container mx-auto max-w-6xl px-4 py-8">
-          <Link to="/explore" className="inline-flex items-center gap-2 text-sm font-semibold text-text-secondary hover:text-primary">
+          <Link to={backTarget} className="inline-flex items-center gap-2 text-sm font-semibold text-text-secondary hover:text-primary">
             <ArrowLeft size={16} />
-            Back to Explore
+            Back to {course.dept || "Explore"}
           </Link>
 
           <div className="mt-6 grid gap-6 lg:grid-cols-[1.2fr,0.8fr]">
-            <div className="rounded-[32px] border bg-white/90 p-6 shadow-sm" style={{ borderColor: theme.accentBorder }}>
+            <div className="rounded-2xl border bg-white/90 p-6 shadow-sm" style={{ borderColor: theme.accentBorder }}>
+              <div className="text-xs font-bold uppercase tracking-[0.16em] text-muted">Should I take this?</div>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="rounded-full border px-3 py-1 text-xs font-bold uppercase tracking-[0.16em]" style={{ borderColor: theme.accentBorder, backgroundColor: theme.accentSoft, color: theme.accentText }}>{course.dept}</span>
                 <span className="rounded-full border border-border bg-surface px-3 py-1 text-xs font-semibold text-text-secondary">{course.credits ?? "?"} credits</span>
@@ -127,7 +130,7 @@ export function CourseProfile() {
               </div>
             </div>
 
-            <div className="rounded-[32px] border border-border bg-white/92 p-6 shadow-sm">
+            <div className="rounded-2xl border border-border bg-white/92 p-6 shadow-sm">
               <div className="text-xs font-bold uppercase tracking-[0.16em] text-muted">Quick read</div>
               <div className="mt-4 rounded-[24px] border border-border bg-surface p-4 text-sm leading-6 text-text-secondary">
                 {comparisonText} {getLoadSummary(course)}
@@ -153,8 +156,9 @@ export function CourseProfile() {
       <div className="container mx-auto max-w-6xl px-4 py-8">
         <div className="mb-6 flex flex-wrap gap-2">
           {[
-            ["basic", "Basic"],
-            ["graphs", "Graph lab"],
+            ["overview", "Overview"],
+            ["workload", "Workload"],
+            ["sections", "Sections"],
             ["details", "Details"],
           ].map(([value, label]) => (
             <button key={value} type="button" onClick={() => setTab(value as ProfileTab)} className={`rounded-full px-4 py-2 text-sm font-semibold ${tab === value ? "bg-primary text-white" : "border border-border bg-white text-text-secondary"}`}>
@@ -163,7 +167,7 @@ export function CourseProfile() {
           ))}
         </div>
 
-        {tab === "basic" && (
+        {tab === "overview" && (
           <section className="grid gap-6 lg:grid-cols-[1.1fr,0.9fr]">
             <div className="rounded-[28px] border border-border bg-white p-6 shadow-sm">
               <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-muted"><BookOpen size={14} />What matters most</div>
@@ -187,11 +191,11 @@ export function CourseProfile() {
           </section>
         )}
 
-        {tab === "graphs" && (
+        {tab === "workload" && (
           <section className="rounded-[28px] border border-border bg-white p-6 shadow-sm">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-muted"><BarChart3 size={14} />Graph lab</div>
+                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-muted"><BarChart3 size={14} />Workload</div>
                 <p className="mt-2 text-sm text-text-secondary">Switch the view to compare workload, volatility, and sample strength without reading a long stats block.</p>
               </div>
               <div className="flex gap-2">
@@ -223,6 +227,19 @@ export function CourseProfile() {
           </section>
         )}
 
+        {tab === "sections" && (
+          <section className="rounded-[28px] border border-border bg-white p-6 shadow-sm">
+            <div className="text-xs font-bold uppercase tracking-[0.16em] text-muted">Section snapshot</div>
+            {sections.length > 0 ? (
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                {sections.map((section) => <div key={section.crn} className="rounded-2xl border border-border bg-surface px-4 py-3 text-sm"><div className="font-bold text-text">Section {section.sec || "TBD"}</div><div className="mt-1 text-text-secondary">{section.title}</div><div className="mt-1 text-xs text-text-secondary">{section.timeslots?.[0]?.instructor || "Instructor TBD"}</div></div>)}
+              </div>
+            ) : (
+              <div className="mt-4"><PageState title="No sections published" description="Section details appear once the catalog has a recent term schedule for this course." /></div>
+            )}
+          </section>
+        )}
+
         {tab === "details" && (
           <section className="grid gap-6 lg:grid-cols-[1.1fr,0.9fr]">
             <div className="rounded-[28px] border border-border bg-white p-6 shadow-sm">
@@ -234,12 +251,6 @@ export function CourseProfile() {
                 <div className="rounded-[28px] border border-border bg-white p-6 shadow-sm">
                   <div className="text-xs font-bold uppercase tracking-[0.16em] text-muted">Requirement tags</div>
                   <div className="mt-4 flex flex-wrap gap-2">{course.attributes.map((attribute) => <span key={attribute} className="rounded-full border border-border bg-surface px-3 py-1 text-xs font-semibold text-text-secondary">{attribute}</span>)}</div>
-                </div>
-              )}
-              {sections.length > 0 && (
-                <div className="rounded-[28px] border border-border bg-white p-6 shadow-sm">
-                  <div className="text-xs font-bold uppercase tracking-[0.16em] text-muted">Section snapshot</div>
-                  <div className="mt-4 space-y-3">{sections.map((section) => <div key={section.crn} className="rounded-2xl border border-border bg-surface px-4 py-3 text-sm"><div className="font-bold text-text">Section {section.sec || "TBD"}</div><div className="mt-1 text-text-secondary">{section.title}</div><div className="mt-1 text-xs text-text-secondary">{section.timeslots?.[0]?.instructor || "Instructor TBD"}</div></div>)}</div>
                 </div>
               )}
               <div className="rounded-[28px] border border-border bg-white p-6 shadow-sm">
