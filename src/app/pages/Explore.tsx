@@ -202,13 +202,15 @@ export function Explore() {
   ].filter(Boolean).slice(0, 4).join(" / ");
   const filteredDepartmentCodes = useMemo(() => {
     const search = departmentSearch.trim().toLowerCase();
-    const source = departments.length ? departments : groupedSubjects.map((group) => group.dept);
+    const source = groupedSubjects
+      .filter((group) => group.courses.length > 0)
+      .map((group) => group.dept);
     return source.filter((code) => {
       if (!search) return true;
       const name = DEPARTMENT_NAMES[code] || "";
       return code.toLowerCase().includes(search) || name.toLowerCase().includes(search);
     });
-  }, [departments, groupedSubjects, departmentSearch]);
+  }, [groupedSubjects, departmentSearch]);
   const visibleDepartments = useMemo(() => new Set(filteredDepartmentCodes), [filteredDepartmentCodes]);
   const directoryClusters = useMemo<DepartmentCluster[]>(() => {
     const seen = new Set<string>();
